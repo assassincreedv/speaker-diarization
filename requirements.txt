@@ -1,0 +1,6 @@
+boto3
+pika
+python-dotenv
+Flask
+pyannote.audio
+pydub
