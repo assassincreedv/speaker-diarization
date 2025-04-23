@@ -98,7 +98,7 @@ def diarize_file():
                 "speaker": speaker
             })
 
-    return jsonify({"type": "SPEAKER", "data": data}), 200
+    return jsonify({"type": "speaker", "data": data}), 200
 
 def convert_to_wav(input_path: Path, output_path: Path) -> None:
     """
@@ -146,7 +146,7 @@ def process_task(body: bytes) -> dict:
 
     return {
         "meetingId": meeting_id,
-        "type": "SPEAKER",
+        "type": "speaker",
         "data": data
     }
 
