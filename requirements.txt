@@ -6,6 +6,7 @@ torch==2.0.1+cu117
 torchvision==0.15.2+cu117
 torchaudio==2.0.2+cu117
 
+numpy<2.0
 chardet>=5.0.0
 charset-normalizer>=3.1.0
 
