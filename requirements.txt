@@ -1,3 +1,14 @@
+# 告诉 pip 去这个源拉带 cu117 的二进制包
+--extra-index-url https://download.pytorch.org/whl/cu117
+
+# GPU 版 torch／vision／audio，一定要写在 pyannote.audio 之前
+torch==2.0.1+cu117
+torchvision==0.15.2+cu117
+torchaudio==2.0.2+cu117
+
+chardet>=5.0.0
+charset-normalizer>=3.1.0
+
 boto3
 pika
 python-dotenv
