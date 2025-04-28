@@ -9,6 +9,8 @@ from threading import Thread
 import torch
 import boto3
 import pika
+import aio_pika
+import asyncio
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 from pyannote.audio import Pipeline
@@ -29,6 +31,10 @@ MQ_VOICE_RESULT_ROUTING_KEY = os.getenv("MQ_VOICE_RESULT_ROUTING_KEY", "voice-re
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_KEY")
 S3_BUCKET = os.getenv("S3_BUCKET")
+
+RABBITMQ_URL = "amqp://{user}:{password}@{host}/".format(
+    user=RABBITMQ_USER, password=RABBITMQ_PASS, host=RABBITMQ_HOST
+)
 
 MODEL_PATH = os.getenv("MODEL_PATH", "./models/speaker-diarization-3.1/config.yaml")
 
@@ -151,45 +157,43 @@ def process_task(body: bytes) -> dict:
     }
 
 
-def consumer():
-    """
-    RabbitMQ consumer that processes diarization tasks.
-    """
-    credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS)
-    connection = pika.BlockingConnection(
-        pika.ConnectionParameters(host=RABBITMQ_HOST, credentials=credentials)
-    )
-    channel = connection.channel()
-
-    # # Declare request queue
-    # channel.queue_declare(queue=REQUEST_QUEUE, durable=True)
-    # # Declare response exchange
-    # channel.exchange_declare(exchange=RESPONSE_EXCHANGE, exchange_type='direct', durable=True)
-    channel.basic_qos(prefetch_count=1)
-
-    def on_message(ch, method, properties, body):
+async def consumer():
+    while True:  # 自动重连循环
         try:
-            result = process_task(body)
-            # Publish to exchange
-            ch.basic_publish(
-                exchange=MQ_VOICE_EXCHANGE,
-                routing_key=MQ_VOICE_RESULT_ROUTING_KEY,
-                body=json.dumps(result),
-                properties=pika.BasicProperties(delivery_mode=2)
-            )
-            ch.basic_ack(delivery_tag=method.delivery_tag)
-            logger.info(f"Finished meetingId={result['meetingId']}")
-        except Exception as e:
-            logger.error(f"Error processing message: {e}", exc_info=True)
-            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+            connection = await aio_pika.connect_robust(RABBITMQ_URL, heartbeat=60)
+            logger.info("Connected to RabbitMQ")
 
-    channel.basic_consume(queue=MQ_VOICE_SPEAKER, on_message_callback=on_message)
-    logger.info("Consumer started, waiting for messages...")
-    channel.start_consuming()
+            channel = await connection.channel()
+            await channel.set_qos(prefetch_count=10)
+
+            queue = await channel.declare_queue(MQ_VOICE_SPEAKER, durable=True)
+
+            async with queue.iterator() as queue_iter:
+                async for message in queue_iter:
+                    async with message.process(ignore_processed=True):
+                        try:
+                            result = await process_task(message.body.decode())
+                            await channel.default_exchange.publish(
+                                aio_pika.Message(
+                                    body=json.dumps(result).encode(),
+                                    delivery_mode=aio_pika.DeliveryMode.PERSISTENT
+                                ),
+                                routing_key=MQ_VOICE_RESULT_ROUTING_KEY
+                            )
+                            logger.info(f"Finished meetingId={result['meetingId']}")
+                        except Exception as e:
+                            logger.error(f"Error processing message: {e}", exc_info=True)
+                            await message.reject(requeue=False)
+        except aio_pika.exceptions.AMQPConnectionError as e:
+            logger.error(f"Connection lost: {e}, reconnecting in 5 seconds...")
+            await asyncio.sleep(5)
 
 def start_consumer_thread():
     """
-    Start the RabbitMQ consumer in a background thread.
+    启动 aio-pika 消费者，在后台线程运行 asyncio 事件循环
     """
-    thread = Thread(target=consumer, daemon=True)
+    def runner():
+        asyncio.run(consumer())
+
+    thread = Thread(target=runner, daemon=True)
     thread.start()

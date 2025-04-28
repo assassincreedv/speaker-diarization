@@ -26,4 +26,4 @@ COPY . .
 EXPOSE 8082
 
 # 把 gunicorn 绑定端口改为 8082
-CMD ["gunicorn", "--workers", "4", "--bind", "0.0.0.0:8082", "wsgi:app"]
+CMD ["gunicorn", "-k", "gevent", "--workers", "1", "--threads", "4", "--timeout", "600", "--bind", "0.0.0.0:8082", "wsgi:app"]
