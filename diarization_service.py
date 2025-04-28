@@ -160,7 +160,7 @@ def process_task(body: bytes) -> dict:
 async def consumer():
     while True:  # 自动重连循环
         try:
-            connection = await aio_pika.connect_robust(RABBITMQ_URL, heartbeat=60)
+            connection = await aio_pika.connect_robust(RABBITMQ_URL, heartbeat=600)
             logger.info("Connected to RabbitMQ")
 
             channel = await connection.channel()
@@ -168,12 +168,17 @@ async def consumer():
 
             queue = await channel.declare_queue(MQ_VOICE_SPEAKER, durable=True)
 
+            exchange = await channel.declare_exchange(
+                MQ_VOICE_EXCHANGE, aio_pika.ExchangeType.DIRECT, durable=True
+            )
+
             async with queue.iterator() as queue_iter:
                 async for message in queue_iter:
                     async with message.process(ignore_processed=True):
                         try:
-                            result = await process_task(message.body.decode())
-                            await channel.default_exchange.publish(
+                            body_str = message.body.decode()
+                            result = await asyncio.to_thread(process_task, body_str)
+                            await exchange.publish(
                                 aio_pika.Message(
                                     body=json.dumps(result).encode(),
                                     delivery_mode=aio_pika.DeliveryMode.PERSISTENT
