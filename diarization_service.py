@@ -8,7 +8,7 @@ from pathlib import Path
 from threading import Thread
 import torch
 import boto3
-import pika
+import re
 import aio_pika
 import asyncio
 from dotenv import load_dotenv
@@ -117,9 +117,18 @@ def convert_to_wav(input_path: Path, output_path: Path) -> None:
     # Export as WAV
     audio.export(str(output_path), format="wav")
 
+
 def format_time(seconds: float) -> float:
     """Format seconds to a float with two decimal places."""
     return round(seconds, 2)
+
+
+def increment_speaker(speaker: str) -> str:
+    match = re.match(r"SPEAKER_(\d+)", speaker)
+    if match:
+        num = int(match.group(1))
+        return f"SPEAKER_{num + 1:02d}"
+    return speaker  # fallback
 
 
 def process_task(body: bytes) -> dict:
@@ -144,10 +153,11 @@ def process_task(body: bytes) -> dict:
         diarization = pipeline(str(wav))
         data = []
         for turn, _, speaker in diarization.itertracks(yield_label=True):
+            new_speaker = increment_speaker(speaker)
             data.append({
                 "startTime": format_time(turn.start),
                 "endTime": format_time(turn.end),
-                "speaker": speaker
+                "speaker": new_speaker
             })
 
     return {
