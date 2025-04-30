@@ -98,10 +98,11 @@ def diarize_file():
         # Collect segments
         data = []
         for turn, _, speaker in diarization.itertracks(yield_label=True):
+            new_speaker = increment_speaker(speaker)
             data.append({
                 "startTime": format_time(turn.start),
                 "endTime": format_time(turn.end),
-                "speaker": speaker
+                "speaker": new_speaker
             })
 
     return jsonify({"type": "speaker", "data": data}), 200
