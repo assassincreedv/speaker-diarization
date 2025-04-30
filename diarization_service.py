@@ -160,24 +160,23 @@ def process_task(body: bytes) -> dict:
 async def consumer():
     while True:  # 自动重连循环
         try:
-            connection = await aio_pika.connect_robust(RABBITMQ_URL, heartbeat=600)
+            # 每次重连，都从新建 connection/channel/queue/exchange
+            connection = await aio_pika.connect_robust(RABBITMQ_URL, heartbeat=300)
             logger.info("Connected to RabbitMQ")
 
             channel = await connection.channel()
             await channel.set_qos(prefetch_count=10)
 
             queue = await channel.declare_queue(MQ_VOICE_SPEAKER, durable=True)
-
             exchange = await channel.declare_exchange(
                 MQ_VOICE_EXCHANGE, aio_pika.ExchangeType.DIRECT, durable=True
             )
 
             async with queue.iterator() as queue_iter:
                 async for message in queue_iter:
-                    async with message.process(ignore_processed=True):
-                        try:
-                            body_str = message.body.decode()
-                            result = await asyncio.to_thread(process_task, body_str)
+                    try:
+                        async with message.process(ignore_processed=True):
+                            result = await asyncio.to_thread(process_task, message.body.decode())
                             await exchange.publish(
                                 aio_pika.Message(
                                     body=json.dumps(result).encode(),
@@ -186,12 +185,17 @@ async def consumer():
                                 routing_key=MQ_VOICE_RESULT_ROUTING_KEY
                             )
                             logger.info(f"Finished meetingId={result['meetingId']}")
-                        except Exception as e:
-                            logger.error(f"Error processing message: {e}", exc_info=True)
-                            await message.reject(requeue=False)
-        except aio_pika.exceptions.AMQPConnectionError as e:
-            logger.error(f"Connection lost: {e}, reconnecting in 5 seconds...")
+                    except Exception as e:
+                        logger.error(f"Error processing message: {e}", exc_info=True)
+                        await message.reject(requeue=False)
+
+        except (aio_pika.exceptions.AMQPConnectionError, aio_pika.exceptions.ChannelInvalidStateError) as e:
+            logger.error(f"Connection or channel lost: {e}, reconnecting in 5 seconds...")
             await asyncio.sleep(5)
+        except Exception as e:
+            logger.error(f"Unexpected error: {e}", exc_info=True)
+            await asyncio.sleep(5)
+
 
 def start_consumer_thread():
     """
