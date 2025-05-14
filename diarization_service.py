@@ -188,6 +188,11 @@ async def consumer():
                     try:
                         async with message.process(ignore_processed=True):
                             result = await asyncio.to_thread(process_task, message.body.decode())
+                            # 这里新增判断
+                            if channel.is_closed or exchange.is_closed:
+                                logger.warning("Channel or exchange is closed. Skipping message...")
+                                await message.reject(requeue=True)
+                                continue
                             await exchange.publish(
                                 aio_pika.Message(
                                     body=json.dumps(result).encode(),
