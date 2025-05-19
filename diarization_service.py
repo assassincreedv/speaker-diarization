@@ -189,10 +189,9 @@ async def consumer():
                         async with message.process(ignore_processed=True):
                             result = await asyncio.to_thread(process_task, message.body.decode())
                             # 这里新增判断
-                            if channel.is_closed or exchange.is_closed:
-                                logger.warning("Channel or exchange is closed. Skipping message...")
-                                await message.reject(requeue=True)
-                                continue
+                            if channel.is_closed:
+                                logger.warning("Channel is closed. Skipping message...")
+                                raise aio_pika.exceptions.ChannelInvalidStateError("Channel closed")
                             await exchange.publish(
                                 aio_pika.Message(
                                     body=json.dumps(result).encode(),
@@ -201,9 +200,12 @@ async def consumer():
                                 routing_key=MQ_VOICE_RESULT_ROUTING_KEY
                             )
                             logger.info(f"Finished meetingId={result['meetingId']}")
+                    except aio_pika.exceptions.ChannelInvalidStateError as e:
+                        logger.warning(f"Channel issue: {e}. Message requeued.")
+                        raise
                     except Exception as e:
                         logger.error(f"Error processing message: {e}", exc_info=True)
-                        await message.reject(requeue=False)
+                        raise
 
         except (aio_pika.exceptions.AMQPConnectionError, aio_pika.exceptions.ChannelInvalidStateError) as e:
             logger.error(f"Connection or channel lost: {e}, reconnecting in 5 seconds...")
